@@ -122,14 +122,15 @@ jobs:
           chmod +x dist/${ARCH}/*
           V="${{ steps.ver.outputs.version }}"
           IMG=forcicd.g8.lo:5000/qregistry
-          # Rootless podman in the nested runner: give it a user-owned
-          # runtime dir and the vfs driver (no nested overlay/fuse).
+          # Rootless podman in the nested runner: user-owned runtime dir +
+          # explicit vfs driver/root (overlay-over-overlayfs is unsupported
+          # without a fuse mount_program).
           export XDG_RUNTIME_DIR="$(mktemp -d)"
-          export STORAGE_DRIVER=vfs
+          PODMAN="podman --storage-driver vfs --root ${XDG_RUNTIME_DIR}/storage --runroot ${XDG_RUNTIME_DIR}/run"
           if command -v podman >/dev/null 2>&1; then
-            podman build --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
-            podman push --tls-verify=false ${IMG}:latest
-            podman push --tls-verify=false ${IMG}:${V}
+            $PODMAN build --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
+            $PODMAN push --tls-verify=false ${IMG}:latest
+            $PODMAN push --tls-verify=false ${IMG}:${V}
           elif command -v buildah >/dev/null 2>&1; then
             buildah bud --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
             buildah push --tls-verify=false ${IMG}:latest
