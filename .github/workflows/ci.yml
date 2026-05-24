@@ -85,6 +85,7 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           PKG_ARCH: amd64
+          ARCH: ${{ env.ARCH }}
         run: |
           chmod +x dist/${ARCH}/qregistry
           nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
@@ -113,13 +114,29 @@ jobs:
         id: ver
         run: echo "version=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')" >> "$GITHUB_OUTPUT"
       - name: build + push image
+        # Daemonless: the runner ships the docker CLI but no dockerd socket
+        # (a runner-capability gap tracked in forcicd#1). Prefer podman /
+        # buildah; if no builder is available, skip cleanly rather than fail
+        # the pipeline — the binaries + rpm/deb still ship.
         run: |
           chmod +x dist/${ARCH}/*
-          docker build --build-arg ARCH=${ARCH} -f deploy/Containerfile \
-            -t forcicd.g8.lo:5000/qregistry:latest \
-            -t forcicd.g8.lo:5000/qregistry:${{ steps.ver.outputs.version }} .
-          docker push forcicd.g8.lo:5000/qregistry:latest
-          docker push forcicd.g8.lo:5000/qregistry:${{ steps.ver.outputs.version }}
+          V="${{ steps.ver.outputs.version }}"
+          IMG=forcicd.g8.lo:5000/qregistry
+          if command -v podman >/dev/null 2>&1; then
+            podman build --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
+            podman push --tls-verify=false ${IMG}:latest
+            podman push --tls-verify=false ${IMG}:${V}
+          elif command -v buildah >/dev/null 2>&1; then
+            buildah bud --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
+            buildah push --tls-verify=false ${IMG}:latest
+            buildah push --tls-verify=false ${IMG}:${V}
+          elif docker info >/dev/null 2>&1; then
+            docker build --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
+            docker push ${IMG}:latest
+            docker push ${IMG}:${V}
+          else
+            echo "::warning::no container builder (podman/buildah/dockerd) on runner — skipping image build. See forcicd#1."
+          fi
 
   # Manual-only until forcicd provides a sanctioned least-privilege PVE
   # deploy path (see github.com/glennswest/forcicd#1). On a normal push the

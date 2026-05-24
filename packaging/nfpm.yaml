@@ -23,7 +23,9 @@ homepage: https://github.com/glennswest/qregistry
 license: MIT
 
 contents:
-  - src: ./dist/${PKG_ARCH}/qregistry
+  # ${ARCH} is the dist staging dir (x86_64); ${PKG_ARCH} is the package
+  # arch field above (amd64 for deb; nfpm maps to x86_64 for rpm).
+  - src: ./dist/${ARCH}/qregistry
     dst: /usr/bin/qregistry
     file_info:
       mode: 0755
