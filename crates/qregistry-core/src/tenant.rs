@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 /// media-type set and default access pattern.
 ///
 /// - `Image`  — container images (default).
-/// - `Pvc`    — persistent-volume contents (data containers); see the
-///   pvc-content-type enhancement. May be a read-only baseline (e.g. a
-///   `default` PVC under a release group) or a host-specific repo that
-///   snapshots are pushed back to.
-/// - `Config` — config-data artifacts.
+/// - `Pvc`    — persistent-volume contents (data containers). May be a
+///   read-only baseline (e.g. a `pvc` repo under a release registry) or a
+///   host-specific repo that snapshots are pushed back to (via
+///   `rspacefs-pvc` capture on the host).
+/// - `Config` — config-data artifacts (incl. keys-as-data-containers, TBD).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ArtifactKind {
@@ -29,12 +29,8 @@ impl ArtifactKind {
     }
 }
 
-/// Storage tier a repo lives on. Each tier is a separate physical drive
-/// mounted into the appliance at its own base path, so a repo's rspacefs
-/// filesystem inherits the speed/durability characteristics of its tier.
-///
-/// - `Fast`    — SSD/NVMe-backed, for actively pushed/pulled images.
-/// - `Archive` — slow rotating/ZFS-backed, for cold images kept long-term.
+/// Storage tier — two tiers, set at the registry (release/layer) level.
+/// Each is a separate physical drive mounted into the appliance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageTier {
@@ -44,7 +40,6 @@ pub enum StorageTier {
 }
 
 impl StorageTier {
-    /// Subdirectory name under the appliance repos root for this tier.
     pub fn dir(self) -> &'static str {
         match self {
             StorageTier::Fast => "fast",
@@ -59,16 +54,31 @@ impl std::fmt::Display for StorageTier {
     }
 }
 
-/// A single registry repo (leaf), the unit of mount placement.
-///
-/// OCI repo names are hierarchical, so `name` is the full slash-path:
-/// e.g. `4.18.2/kernel`, `4.18.2/system`, `4.18.2/general`. The leading
-/// component(s) form a logical group; the leaf is what gets its own mount.
-/// Each repo maps to its own root at `<data_dir>/repos/<tier>/<name>`
-/// (per-repo placement onto tier mounts via rspace_registry#1).
+/// A **registry** — a named release/layer group (e.g. `4.18.4`) that holds
+/// multiple repos and lives on one storage tier. Migration between tiers is
+/// performed locally by rspacefs (capture/pivot); qregistry coordinates and
+/// repoints. The tier here is the default for the registry's repos.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Registry {
+    pub name: String,
+
+    #[serde(default)]
+    pub description: String,
+
+    /// Storage tier for this registry's repos. Defaults to `fast`.
+    #[serde(default)]
+    pub tier: StorageTier,
+}
+
+/// A **repo** (an rspacefs filesystem) within a registry. Full OCI repo
+/// path is `<registry>/<name>` — e.g. registry `4.18.4`, repo `system`
+/// → `4.18.4/system`. Each repo is its own rspacefs.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tenant {
-    /// Full hierarchical repo path, e.g. `4.18.2/kernel`.
+    /// Parent registry name (e.g. `4.18.4`).
+    pub registry: String,
+
+    /// Repo name within the registry (e.g. `system`, `user`, `pvc`).
     pub name: String,
 
     #[serde(default)]
@@ -78,12 +88,8 @@ pub struct Tenant {
     #[serde(default)]
     pub kind: ArtifactKind,
 
-    /// Storage tier (fast SSD vs slow archival). Defaults to `fast`.
-    #[serde(default)]
-    pub tier: StorageTier,
-
-    /// Explicit mount point override. If unset, derived from tier + name:
-    /// `<data_dir>/repos/<tier>/<name>`.
+    /// Explicit mount-point override; otherwise derived from the registry's
+    /// tier and the full path.
     #[serde(default)]
     pub mount_point: Option<PathBuf>,
 
@@ -93,20 +99,20 @@ pub struct Tenant {
 }
 
 impl Tenant {
-    /// Logical group = everything before the last path component, or "" for
-    /// a top-level repo. `4.18.2/kernel` -> `4.18.2`; `alpine` -> "".
-    pub fn group(&self) -> &str {
-        match self.name.rfind('/') {
-            Some(i) => &self.name[..i],
-            None => "",
-        }
+    /// Full hierarchical OCI repo path, `<registry>/<name>`.
+    pub fn full_path(&self) -> String {
+        format!("{}/{}", self.registry, self.name)
     }
 
-    /// Mount point of this repo's rspacefs filesystem. Honors an explicit
-    /// `mount_point`, otherwise derives `<data_dir>/repos/<tier>/<name>`.
-    pub fn effective_mount_point(&self, data_dir: &Path) -> PathBuf {
+    /// rspacefs mount point for this repo. Honors an explicit override,
+    /// otherwise `<data_dir>/repos/<tier>/<registry>/<name>`.
+    pub fn effective_mount_point(&self, data_dir: &Path, tier: StorageTier) -> PathBuf {
         self.mount_point.clone().unwrap_or_else(|| {
-            data_dir.join("repos").join(self.tier.dir()).join(&self.name)
+            data_dir
+                .join("repos")
+                .join(tier.dir())
+                .join(&self.registry)
+                .join(&self.name)
         })
     }
 }

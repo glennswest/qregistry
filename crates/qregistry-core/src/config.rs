@@ -1,28 +1,29 @@
-use crate::{Tenant, User};
+use crate::{Registry, StorageTier, Tenant, User};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Top-level appliance configuration loaded from `qregistry.toml`.
 ///
-/// The matching `stormd.toml` declares the supervised processes — see
-/// `config/stormd.toml`. These two files are co-designed: every tenant in
-/// `tenants` should have a corresponding `rspacefs-mount.<name>` process in
-/// the stormd config so its data dir is a real rspacefs mount.
+/// Hierarchy: the appliance runs **one** OCI service ([`OciEndpoint`]) that
+/// hosts multiple [`Registry`]s (release/layer groups, each on a tier), each
+/// holding multiple repos ([`Tenant`], an rspacefs filesystem).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub server: ServerConfig,
 
-    /// The single OCI registry instance. It serves all repos; per-repo
-    /// placement onto different tier mounts is delivered by rspace_registry
-    /// per-repo storage roots (rspace_registry#1) and expressed via each
-    /// tenant's `tier`/`mount_point`.
+    /// The single OCI service endpoint (where clients push/pull).
     #[serde(default)]
-    pub registry: RegistryEndpoint,
+    pub oci: OciEndpoint,
 
+    /// Release/layer registries (e.g. `4.18.4`), each pinned to a tier.
     #[serde(default)]
-    pub tenants: Vec<Tenant>,
+    pub registries: Vec<Registry>,
+
+    /// Repos (rspacefs filesystems), each belonging to a registry.
+    #[serde(default)]
+    pub repos: Vec<Tenant>,
 
     #[serde(default)]
     pub users: Vec<User>,
@@ -43,19 +44,18 @@ impl Default for ServerConfig {
     }
 }
 
-/// The OCI registry endpoint. A single rspace-registry instance serves all
-/// repos; per-repo placement onto tier mounts is handled by rspace_registry
-/// per-repo storage roots (rspace_registry#1).
+/// The single OCI registry service. One `rspace-registry` instance serves
+/// all registries/repos; per-repo placement onto tier mounts is delivered
+/// by rspace_registry per-repo storage roots (rspace_registry#1).
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RegistryEndpoint {
+pub struct OciEndpoint {
     /// Externally reachable URL, for display + client docs.
     pub url: String,
-
     /// Bind address the rspace-registry instance listens on.
     pub listen: String,
 }
 
-impl Default for RegistryEndpoint {
+impl Default for OciEndpoint {
     fn default() -> Self {
         Self {
             url: "http://qregistry.g8.lo:5000".into(),
@@ -71,5 +71,20 @@ impl AppConfig {
         let cfg: AppConfig =
             toml::from_str(&text).with_context(|| format!("parse config {}", path.display()))?;
         Ok(cfg)
+    }
+
+    /// Tier of the registry a repo belongs to (defaults to `fast` if the
+    /// registry isn't declared).
+    pub fn repo_tier(&self, repo: &Tenant) -> StorageTier {
+        self.registries
+            .iter()
+            .find(|r| r.name == repo.registry)
+            .map(|r| r.tier)
+            .unwrap_or_default()
+    }
+
+    /// Resolved rspacefs mount point for a repo.
+    pub fn repo_mount(&self, repo: &Tenant) -> PathBuf {
+        repo.effective_mount_point(&self.server.data_dir, self.repo_tier(repo))
     }
 }

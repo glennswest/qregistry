@@ -18,50 +18,74 @@ pub async fn health() -> Json<HealthResponse> {
 }
 
 #[derive(Serialize)]
-pub struct TenantSummary {
+pub struct RegistrySummary {
     pub name: String,
     pub tier: String,
-    pub public: bool,
-    pub mount_point: String,
+    pub repos: usize,
     pub description: String,
 }
 
-pub async fn list_tenants(State(state): State<Arc<AppState>>) -> Json<Vec<TenantSummary>> {
+pub async fn list_registries(State(state): State<Arc<AppState>>) -> Json<Vec<RegistrySummary>> {
     let cfg = state.config.read().await;
-    let data_dir = cfg.server.data_dir.clone();
-    let tenants = cfg
-        .tenants
+    let out = cfg
+        .registries
         .iter()
-        .map(|t| TenantSummary {
-            name: t.name.clone(),
-            tier: t.tier.to_string(),
-            public: t.public,
-            mount_point: t.effective_mount_point(&data_dir).display().to_string(),
-            description: t.description.clone(),
+        .map(|r| RegistrySummary {
+            name: r.name.clone(),
+            tier: r.tier.to_string(),
+            repos: cfg.repos.iter().filter(|t| t.registry == r.name).count(),
+            description: r.description.clone(),
         })
         .collect();
-    Json(tenants)
+    Json(out)
+}
+
+#[derive(Serialize)]
+pub struct RepoSummary {
+    pub path: String,
+    pub registry: String,
+    pub kind: String,
+    pub tier: String,
+    pub public: bool,
+    pub mount_point: String,
+}
+
+pub async fn list_repos(State(state): State<Arc<AppState>>) -> Json<Vec<RepoSummary>> {
+    let cfg = state.config.read().await;
+    let out = cfg
+        .repos
+        .iter()
+        .map(|t| RepoSummary {
+            path: t.full_path(),
+            registry: t.registry.clone(),
+            kind: t.kind.as_str().to_string(),
+            tier: cfg.repo_tier(t).to_string(),
+            public: t.public,
+            mount_point: cfg.repo_mount(t).display().to_string(),
+        })
+        .collect();
+    Json(out)
 }
 
 #[derive(Serialize)]
 pub struct UserSummary {
     pub username: String,
     pub admin: bool,
-    pub push_tenants: Vec<String>,
+    pub push_repos: Vec<String>,
 }
 
 pub async fn list_users(State(state): State<Arc<AppState>>) -> Json<Vec<UserSummary>> {
     let cfg = state.config.read().await;
-    let users = cfg
+    let out = cfg
         .users
         .iter()
         .map(|u| UserSummary {
             username: u.username.clone(),
             admin: u.admin,
-            push_tenants: u.push_tenants.clone(),
+            push_repos: u.push_tenants.clone(),
         })
         .collect();
-    Json(users)
+    Json(out)
 }
 
 #[derive(Serialize)]
@@ -70,7 +94,6 @@ pub struct ReloadResponse {
 }
 
 pub async fn reload() -> Json<ReloadResponse> {
-    // v0.1: no-op. v0.2 will re-read config from disk and rewrite stormd
-    // config to add/remove rspacefs-mount processes per the new tenant set.
+    // v0.2: re-read config and reconcile registries/repos + rspacefs mounts.
     Json(ReloadResponse { reloaded: false })
 }

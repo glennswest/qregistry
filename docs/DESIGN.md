@@ -1,14 +1,31 @@
 # qregistry — Consolidated Design
 
-Status: **proposal for confirmation.** Captures the architecture as it
-evolved during initial design. Implementation tracks this once confirmed.
+Status: **confirmed model** (2026-05-24). Implemented in the config/UI
+layer; storage placement + migration depend on sibling work (see §5).
+
+## 0. Hierarchy (the mental model)
+
+```
+qregistry (one LXC appliance, one OCI service)
+└── registry = release/layer group, pinned to a tier   e.g. 4.18.4 (fast)
+    └── repo  = an rspacefs filesystem                  e.g. system, user, pvc
+OCI path: <registry>/<repo>  →  4.18.4/system
+```
+
+- **Tier is chosen per registry** (the whole release/layer sits on fast or
+  archive); repos inherit it.
+- **Migration between tiers** moves a registry's repos and is performed
+  **locally by rspacefs** (`rspacefs-pvc` capture/pivot); qregistry
+  coordinates and repoints. Two tiers only: `fast` (NVMe), `archive` (ZFS).
+- **PVC snapshots** are captured + pushed back **by the host** (rspacefs-pvc).
+- Keys/secrets may ship **as config data-container artifacts** — TBD.
 
 ## 1. What qregistry is
 
 A multi-tenant, **hierarchical** OCI registry **appliance** that stores
 container images, **PVC data containers**, and **config artifacts** — with
 **per-repo placement onto storage tiers** (separate physical drives) and
-**migration between tiers**.
+**registry-level migration between tiers**.
 
 Delivered as a **Proxmox LXC** on a Fedora base, built and deployed by
 **forcicd** (local Forgejo Actions), rolled by the **cigate** deploy gate
@@ -127,12 +144,29 @@ drain-and-swap by qregistry?**
 with `[[tiers]]` definitions + `tier` as a name reference, and add
 migration orchestration.)
 
-## 7. Open questions
+## 7. Decisions & remaining TBDs
 
-1. Tier set + names for g8 (proposal: `nvme`, `archive`; add `sata`?).
-2. Migration repoint semantics — rspace_registry-atomic vs qregistry drain-swap.
-3. Single appliance container (UI + one registry via entrypoint) vs cigate
-   **pod** (separate UI/registry containers). Pod gives per-container
-   restart; single container is simpler.
-4. Host-snapshot PVC repos: auth model for a host pushing its own snapshots
-   (robot/scoped token per host?).
+Resolved:
+1. **Two tiers** — `fast` (NVMe) + `archive` (ZFS). No middle tier.
+2. **Migration repoint** is done by **rspacefs locally** (capture/pivot);
+   rspace_registry only repoints a repo's root (rspace_registry#1).
+3. **Single appliance** — one OCI service + UI in one CT.
+4. **Snapshots pushed by the PVC host** (rspacefs-pvc capture).
+
+Still TBD:
+- Host-snapshot PVC auth (per-host robot/scoped token).
+- Keys/secrets distribution as config data-container artifacts.
+- Cigate single-container vs pod for the appliance (leaning single).
+
+## 8. Sibling state (rescanned 2026-05-24)
+
+- **forcicd**: runner fixed at source — `--privileged + /dev/fuse`,
+  `BUILDAH_ISOLATION=chroot`, per-job XDG; now **webhook-driven**. The
+  plain `podman build` in CI works. cigate gate (forcicd#1) + pod verb
+  (forcicd#2) shipped.
+- **rspacefs**: has the **`rspacefs-pvc`** crate — `capture_layer`,
+  `pivot_upper`, `PvcMount`/`PvcAccessMode`/`PvcLifecycle`. This is the
+  host-snapshot + local tier-pivot machinery.
+- **rspace_registry**: still digest-only blobs, MultiStore (replicate-and-
+  pivot) only; per-repo storage roots **not yet implemented**
+  (rspace_registry#1 open).

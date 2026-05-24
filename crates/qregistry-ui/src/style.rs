@@ -61,7 +61,8 @@ pub fn subnav(active: &str) -> String {
     let mut out = String::from("<div class=\"subnav\">");
     for (name, href) in [
         ("Overview", "/"),
-        ("Repos", "/tenants"),
+        ("Registries", "/registries"),
+        ("Repos", "/repos"),
         ("Users", "/users"),
         ("System", "/system"),
     ] {

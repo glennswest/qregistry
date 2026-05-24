@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### 2026-05-24 (model: registries → repos)
+- **feat:** Three-level model — one OCI service hosts many **registries** (release/layer groups, each pinned to a tier), each holding **repos** (rspacefs filesystems). OCI path `<registry>/<repo>` (e.g. `4.18.4/system`). New `Registry` + `OciEndpoint` types; `Tenant` is now a repo with a `registry` field; tier moved to the registry level.
+- **feat:** UI reworked — Overview / **Registries** / Repos / Users / System; repo mounts resolve to `<data_dir>/repos/<tier>/<registry>/<repo>`; `/api/v1/{registries,repos,users}`.
+- **feat:** Artifact `kind` (image/pvc/config) retained; PVC repos cover host snapshot-back (via rspacefs-pvc) and read-only baselines.
+- **docs:** `docs/DESIGN.md` confirmed — two tiers (fast/archive), registry-level tiering, **migration repoint done locally by rspacefs** (capture/pivot), single appliance, snapshots pushed by the PVC host; keys-as-data-containers TBD. Sibling rescan recorded (forcicd runner fixed + webhook-driven; rspacefs-pvc crate; rspace_registry#1 still pending).
+- **chore:** Filed rspace_registry#1 (per-repo storage roots, hierarchical + tier mounts + repoint) and forcicd#1/#2 (cigate deploy gate + pod-in-LXC).
+
 ### 2026-05-24
 - **feat:** Initial project scaffold — Cargo workspace with `qregistry`, `qregistry-core`, `qregistry-ui` crates.
 - **feat:** qregistry-core defines `AppConfig`, `RegistryEndpoint`, `Tenant` (with `StorageTier`), `User`.

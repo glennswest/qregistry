@@ -8,6 +8,6 @@ pub mod config;
 pub mod tenant;
 pub mod user;
 
-pub use config::AppConfig;
-pub use tenant::{ArtifactKind, StorageTier, Tenant};
+pub use config::{AppConfig, OciEndpoint};
+pub use tenant::{ArtifactKind, Registry, StorageTier, Tenant};
 pub use user::User;

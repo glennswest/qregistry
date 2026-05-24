@@ -1,55 +1,60 @@
-# qregistry.toml — appliance config loaded by the qregistry binary at startup.
+# qregistry.toml — appliance config loaded by the qregistry binary.
 #
-# Fedora LXC, systemd-supervised. Two OCI registry instances, one per
-# storage tier (separate physical drives mounted into the CT):
-#   fast    -> :5000, /var/lib/qregistry/repos/fast    (NVMe, production-lvm)
-#   archive -> :5001, /var/lib/qregistry/repos/archive (ZFS HDD, impulse1)
+# Hierarchy: one OCI service hosts many registries (release/layer groups,
+# each on a storage tier); each registry holds repos (rspacefs filesystems).
+#   <registry>/<repo>  e.g.  4.18.4/system, 4.18.4/pvc
+# Tiers (separate physical drives mounted into the CT):
+#   fast    -> NVMe (production-lvm)
+#   archive -> ZFS HDD (impulse1)
 
 [server]
-bind = "0.0.0.0:8081"             # admin UI (front door)
+bind = "0.0.0.0:8081"
 data_dir = "/var/lib/qregistry"
 
-# --- Registry endpoints (one rspace-registry systemd service each) ---
-[[registries]]
-name = "fast"
-tier = "fast"
+[oci]
 url = "http://qregistry.g8.lo:5000"
 listen = "0.0.0.0:5000"
 
+# --- Registries (release/layer groups, each pinned to a tier) ---
 [[registries]]
-name = "archive"
-tier = "archive"
-url = "http://qregistry.g8.lo:5001"
-listen = "0.0.0.0:5001"
-
-# --- Tenants (repos) ---
-# Each tenant maps to its own rspacefs filesystem (v0.2) mounted at
-# <data_dir>/repos/<tier>/<name>.
-
-[[tenants]]
-name = "default"
-description = "Active images on NVMe."
+name = "4.18.4"
+description = "Active release layer."
 tier = "fast"
+
+[[registries]]
+name = "4.17.9"
+description = "Previous release — migrated to archive."
+tier = "archive"
+
+# --- Repos (rspacefs filesystems within a registry) ---
+[[repos]]
+registry = "4.18.4"
+name = "system"
+kind = "image"
 public = true
 
-[[tenants]]
-name = "dev"
-description = "Internal development images on NVMe."
-tier = "fast"
-public = false
+[[repos]]
+registry = "4.18.4"
+name = "user"
+kind = "image"
 
-[[tenants]]
-name = "cold"
-description = "Cold images on the slow ZFS drive."
-tier = "archive"
-public = false
+[[repos]]
+registry = "4.18.4"
+name = "pvc"
+kind = "pvc"
+description = "Default PVC baseline for the layer."
+public = true
+
+[[repos]]
+registry = "4.17.9"
+name = "system"
+kind = "image"
 
 # --- Users ---
 # password_hash is bcrypt. Generate with: htpasswd -nbB <user> <password>
-
 [[users]]
 username = "admin"
 # bcrypt of "changeme" — REPLACE BEFORE DEPLOYING.
 password_hash = "$2b$12$Du6Q4D6jzN3Y2g4N8eYqYO1bL3z0o1k0c0Z3o7Y2g4N8eYqYO1bL3z"
 admin = true
-push_tenants = ["default", "dev", "cold"]
+push_tenants = ["4.18.4/system", "4.18.4/user", "4.18.4/pvc"]
