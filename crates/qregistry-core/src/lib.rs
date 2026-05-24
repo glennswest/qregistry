@@ -9,5 +9,5 @@ pub mod tenant;
 pub mod user;
 
 pub use config::AppConfig;
-pub use tenant::{StorageTier, Tenant};
+pub use tenant::{ArtifactKind, StorageTier, Tenant};
 pub use user::User;

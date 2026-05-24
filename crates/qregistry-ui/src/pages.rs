@@ -18,27 +18,6 @@ pub async fn overview(State(state): State<Arc<AppState>>) -> Html<String> {
     let admin_count = cfg.users.iter().filter(|u| u.admin).count();
     let public_count = cfg.tenants.iter().filter(|t| t.public).count();
 
-    let reg_rows: String = cfg
-        .registries
-        .iter()
-        .map(|r| {
-            let tier_badge = match r.tier {
-                qregistry_core::StorageTier::Fast => {
-                    r#"<span class="badge badge-cyan">fast</span>"#
-                }
-                qregistry_core::StorageTier::Archive => {
-                    r#"<span class="badge badge-yellow">archive</span>"#
-                }
-            };
-            format!(
-                r#"<tr><td class="mono">{name}</td><td>{tier}</td><td class="mono">{url}</td></tr>"#,
-                name = esc(&r.name),
-                tier = tier_badge,
-                url = esc(&r.url),
-            )
-        })
-        .collect();
-
     let body = format!(
         r#"<div class="stats-grid">
     <div class="stat-card"><div class="label">Repos</div><div class="value cyan">{tenant_count}</div></div>
@@ -47,17 +26,15 @@ pub async fn overview(State(state): State<Arc<AppState>>) -> Html<String> {
     <div class="stat-card"><div class="label">Admins</div><div class="value yellow">{admin_count}</div></div>
 </div>
 <div class="card">
-    <h2>Registry Endpoints</h2>
-    <table>
-        <thead><tr><th>Name</th><th>Tier</th><th>OCI endpoint</th></tr></thead>
-        <tbody>{reg_rows}</tbody>
-    </table>
-    <p class="hint">Two registry instances on separate drives: <span class="badge badge-cyan">fast</span> on NVMe, <span class="badge badge-yellow">archive</span> on the slow ZFS drive. Push: <code class="mono">podman push --tls-verify=false &lt;host&gt;:&lt;port&gt;/&lt;repo&gt;/&lt;image&gt;:&lt;tag&gt;</code></p>
+    <h2>Registry</h2>
+    <p>OCI endpoint: <code class="mono">{url}</code></p>
+    <p class="hint">One registry serves all repos. Repos are hierarchical (e.g. <code>4.18.2/kernel</code>) and each leaf can live on its own tier mount (per-repo storage roots — rspace_registry#1). Push: <code class="mono">podman push --tls-verify=false &lt;host&gt;:5000/&lt;group&gt;/&lt;repo&gt;:&lt;tag&gt;</code></p>
 </div>
 <div class="card">
     <h2>About qregistry</h2>
-    <p>A Proxmox LXC appliance bundling <code>rspace_registry</code> + <code>rspacefs</code>, supervised by systemd on a Fedora base. Each repo is its own rspacefs filesystem on a tiered, separate drive.</p>
-</div>"#
+    <p>A Proxmox LXC appliance bundling <code>rspace_registry</code> + <code>rspacefs</code> on a Fedora base. Multi-tenant, hierarchical OCI registry storing images, PVCs, and config artifacts — each repo placeable on its own tier mount.</p>
+</div>"#,
+        url = esc(&cfg.registry.url),
     );
     Html(page("Overview", "Overview", &body))
 }
@@ -86,19 +63,27 @@ pub async fn tenants(State(state): State<Arc<AppState>>) -> Html<String> {
                         r#"<span class="badge badge-yellow">archive</span>"#
                     }
                 };
+                let group = t.group();
+                let group_cell = if group.is_empty() {
+                    "<span style=\"color:#555\">—</span>".to_string()
+                } else {
+                    format!(r#"<span class="mono" style="color:#888">{}</span>"#, esc(group))
+                };
                 format!(
                     r#"<tr>
     <td class="mono">{name}</td>
+    <td>{group}</td>
+    <td><span class="badge badge-gray">{kind}</span></td>
     <td>{tier}</td>
     <td>{public}</td>
     <td class="mono" style="color:#888;font-size:12px">{mount}</td>
-    <td style="color:#888">{desc}</td>
 </tr>"#,
                     name = esc(&t.name),
+                    group = group_cell,
+                    kind = esc(t.kind.as_str()),
                     tier = tier_badge,
                     public = public_badge,
                     mount = esc(&mount.display().to_string()),
-                    desc = esc(&t.description),
                 )
             })
             .collect()
@@ -108,10 +93,10 @@ pub async fn tenants(State(state): State<Arc<AppState>>) -> Html<String> {
         r#"<div class="card">
     <h2>Repos</h2>
     <table>
-        <thead><tr><th>Name</th><th>Tier</th><th>Visibility</th><th>Mount point (rspacefs)</th><th>Description</th></tr></thead>
+        <thead><tr><th>Repo</th><th>Group</th><th>Kind</th><th>Tier</th><th>Visibility</th><th>Mount</th></tr></thead>
         <tbody>{rows}</tbody>
     </table>
-    <p class="hint">Each repo is a separate rspacefs filesystem. <span class="badge badge-cyan">fast</span> repos live on NVMe, <span class="badge badge-yellow">archive</span> repos on the slow ZFS drive — each tier is a separate physical drive mounted into the appliance. Mount lifecycle is managed by stormd. Dynamic add/remove lands in v0.2.</p>
+    <p class="hint">Hierarchical repos (e.g. <code>4.18.2/kernel</code>). Each leaf repo can live on its own mount: <span class="badge badge-cyan">fast</span> NVMe or <span class="badge badge-yellow">archive</span> ZFS. Kinds: image, pvc (incl. host snapshot-back), config. Per-repo placement via rspace_registry#1; dynamic CRUD in v0.2.</p>
 </div>"#
     );
     Html(page("Repos", "Repos", &body))
@@ -170,12 +155,7 @@ pub async fn users(State(state): State<Arc<AppState>>) -> Html<String> {
 
 pub async fn system(State(state): State<Arc<AppState>>) -> Html<String> {
     let cfg = state.config.read().await;
-    let reg_list = cfg
-        .registries
-        .iter()
-        .map(|r| format!("{} ({}): {} → {}", r.name, r.tier, r.url, r.listen))
-        .collect::<Vec<_>>()
-        .join("<br>");
+    let reg_list = format!("{} → {}", cfg.registry.url, cfg.registry.listen);
 
     let body = format!(
         r#"<div class="card">
@@ -183,7 +163,7 @@ pub async fn system(State(state): State<Arc<AppState>>) -> Html<String> {
     <table>
         <tr><td>UI bind</td><td class="mono">{bind}</td></tr>
         <tr><td>Data dir</td><td class="mono">{data}</td></tr>
-        <tr><td>Registries</td><td class="mono">{reg}</td></tr>
+        <tr><td>Registry</td><td class="mono">{reg}</td></tr>
     </table>
 </div>
 <div class="card">

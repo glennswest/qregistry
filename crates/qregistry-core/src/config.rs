@@ -1,4 +1,4 @@
-use crate::{StorageTier, Tenant, User};
+use crate::{Tenant, User};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -14,10 +14,12 @@ pub struct AppConfig {
     #[serde(default)]
     pub server: ServerConfig,
 
-    /// One OCI registry instance per storage tier (fast SSD, slow archive).
-    /// Each is run by systemd as its own rspace-registry service.
-    #[serde(default = "default_registries")]
-    pub registries: Vec<RegistryEndpoint>,
+    /// The single OCI registry instance. It serves all repos; per-repo
+    /// placement onto different tier mounts is delivered by rspace_registry
+    /// per-repo storage roots (rspace_registry#1) and expressed via each
+    /// tenant's `tier`/`mount_point`.
+    #[serde(default)]
+    pub registry: RegistryEndpoint,
 
     #[serde(default)]
     pub tenants: Vec<Tenant>,
@@ -41,15 +43,11 @@ impl Default for ServerConfig {
     }
 }
 
-/// A single OCI registry endpoint, bound to one storage tier. Run as a
-/// dedicated rspace-registry systemd service inside the appliance.
+/// The OCI registry endpoint. A single rspace-registry instance serves all
+/// repos; per-repo placement onto tier mounts is handled by rspace_registry
+/// per-repo storage roots (rspace_registry#1).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RegistryEndpoint {
-    pub name: String,
-
-    #[serde(default)]
-    pub tier: StorageTier,
-
     /// Externally reachable URL, for display + client docs.
     pub url: String,
 
@@ -57,21 +55,13 @@ pub struct RegistryEndpoint {
     pub listen: String,
 }
 
-fn default_registries() -> Vec<RegistryEndpoint> {
-    vec![
-        RegistryEndpoint {
-            name: "fast".into(),
-            tier: StorageTier::Fast,
+impl Default for RegistryEndpoint {
+    fn default() -> Self {
+        Self {
             url: "http://qregistry.g8.lo:5000".into(),
             listen: "0.0.0.0:5000".into(),
-        },
-        RegistryEndpoint {
-            name: "archive".into(),
-            tier: StorageTier::Archive,
-            url: "http://qregistry.g8.lo:5001".into(),
-            listen: "0.0.0.0:5001".into(),
-        },
-    ]
+        }
+    }
 }
 
 impl AppConfig {
