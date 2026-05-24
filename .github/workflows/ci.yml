@@ -58,7 +58,7 @@ jobs:
           cp ../siblings/rspacefs/target/release/rspacefs-mount    dist/${ARCH}/
           file dist/${ARCH}/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: qregistry-bins-${{ env.ARCH }}
           path: dist/${{ env.ARCH }}/*
@@ -70,7 +70,7 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           name: qregistry-bins-${{ env.ARCH }}
           path: dist/${{ env.ARCH }}
@@ -90,7 +90,7 @@ jobs:
           nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
           nfpm package -f packaging/nfpm.yaml -p deb -t dist/
           ls -l dist/*.rpm dist/*.deb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v3
         with:
           name: qregistry-packages
           path: |
@@ -105,7 +105,7 @@ jobs:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           name: qregistry-bins-${{ env.ARCH }}
           path: dist/${{ env.ARCH }}
@@ -115,11 +115,11 @@ jobs:
       - name: build + push image
         run: |
           chmod +x dist/${ARCH}/*
-          podman build --build-arg ARCH=${ARCH} -f deploy/Containerfile \
+          docker build --build-arg ARCH=${ARCH} -f deploy/Containerfile \
             -t forcicd.g8.lo:5000/qregistry:latest \
             -t forcicd.g8.lo:5000/qregistry:${{ steps.ver.outputs.version }} .
-          podman push --tls-verify=false forcicd.g8.lo:5000/qregistry:latest
-          podman push --tls-verify=false forcicd.g8.lo:5000/qregistry:${{ steps.ver.outputs.version }}
+          docker push forcicd.g8.lo:5000/qregistry:latest
+          docker push forcicd.g8.lo:5000/qregistry:${{ steps.ver.outputs.version }}
 
   deploy:
     name: provision LXC on pve.g8.lo
@@ -128,7 +128,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v3
         with:
           name: qregistry-bins-${{ env.ARCH }}
           path: dist/${{ env.ARCH }}
