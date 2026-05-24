@@ -19,3 +19,4 @@
 - Pivoted deploy target from MikroTik Rose scratch-OCI (stormd PID 1) to **Proxmox LXC on a Fedora base** (systemd). Rose scratch-OCI flavor deferred to v1.0.
 - Dropped stormd on Fedora (systemd supervises instead); this also keeps CI to public repos only.
 - Build moved to the forcicd Linux runner because `rspacefs`/`fuser` cannot cross-compile from a macOS host.
+
