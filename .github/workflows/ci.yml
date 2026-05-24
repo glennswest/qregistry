@@ -85,9 +85,9 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           PKG_ARCH: amd64
-          ARCH: ${{ env.ARCH }}
         run: |
-          chmod +x dist/${ARCH}/qregistry
+          cp dist/${ARCH}/qregistry dist/qregistry
+          chmod +x dist/qregistry
           nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
           nfpm package -f packaging/nfpm.yaml -p deb -t dist/
           ls -l dist/*.rpm dist/*.deb
@@ -122,6 +122,10 @@ jobs:
           chmod +x dist/${ARCH}/*
           V="${{ steps.ver.outputs.version }}"
           IMG=forcicd.g8.lo:5000/qregistry
+          # Rootless podman in the nested runner: give it a user-owned
+          # runtime dir and the vfs driver (no nested overlay/fuse).
+          export XDG_RUNTIME_DIR="$(mktemp -d)"
+          export STORAGE_DRIVER=vfs
           if command -v podman >/dev/null 2>&1; then
             podman build --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
             podman push --tls-verify=false ${IMG}:latest
