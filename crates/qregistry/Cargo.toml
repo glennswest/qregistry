@@ -1,0 +1,24 @@
+[package]
+name = "qregistry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Registry appliance binary — loads config, runs the admin UI."
+
+[[bin]]
+name = "qregistry"
+path = "src/main.rs"
+
+[dependencies]
+qregistry-core = { path = "../qregistry-core" }
+qregistry-ui = { path = "../qregistry-ui" }
+
+axum.workspace = true
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,24 @@
+# qregistry appliance image.
+#
+# FROM stormdbase — multi-arch (arm64 + amd64) scratch image with stormd
+# as PID 1 and busybox-style commands in /bin. The container runtime
+# picks the right architecture automatically.
+#
+# All three binaries (qregistry, rspace-registry, rspacefs-mount) must
+# already be cross-compiled and present in the build context. See
+# deploy/Makefile for the full pipeline.
+
+FROM registry.gt.lo:5000/stormdbase:latest
+
+# Static binaries (musl, target arch)
+COPY qregistry        /qregistry
+COPY rspace-registry  /rspace-registry
+COPY rspacefs-mount   /rspacefs-mount
+
+# Configs
+COPY config/qregistry.toml   /etc/qregistry/qregistry.toml
+COPY config/stormd.toml      /etc/stormd/config.toml
+
+# stormd is PID 1; it reads /etc/stormd/config.toml and supervises everything.
+EXPOSE 22 5000 9080
+ENTRYPOINT ["/stormd"]

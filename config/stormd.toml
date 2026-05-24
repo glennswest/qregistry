@@ -1,0 +1,94 @@
+# stormd.toml — supervisor config baked into the qregistry appliance image.
+#
+# stormd is PID 1 in the scratch container. It runs:
+#   - qregistry-ui      (admin/gui, port 8081, registered as UI plugin)
+#   - rspace-registry   (OCI registry, port 5000)
+#   - rspacefs-mount    (one per tenant repo)
+#
+# This file lives at /etc/stormd/config.toml inside the image.
+
+[general]
+name = "qregistry"
+log_dir = "/var/stormd/logs"
+
+[api]
+bind = "0.0.0.0:9080"
+
+[ssh]
+enabled = true
+bind = "0.0.0.0:22"
+password = "changeme"   # REPLACE BEFORE DEPLOYING
+
+[stormlog.terminal]
+rows = 50
+cols = 120
+
+# --- qregistry admin UI ---
+[[process]]
+name = "qregistry"
+command = "/qregistry"
+args = ["--config", "/etc/qregistry/qregistry.toml"]
+env = { RUST_LOG = "info" }
+on_failure = "restart"
+on_exit = "restart"
+restart_delay_secs = 2
+
+[process.liveness]
+type = "http"
+url = "http://127.0.0.1:8081/api/v1/health"
+interval_secs = 10
+initial_delay_secs = 5
+
+[process.ui]
+label = "Registry"
+proxy = "http://127.0.0.1:8081"
+
+# --- rspace_registry (the OCI head) ---
+[[process]]
+name = "rspace-registry"
+command = "/rspace-registry"
+args = [
+    "--listen", "0.0.0.0:5000",
+    "--data", "/var/lib/qregistry/registry",
+]
+env = { RUST_LOG = "info" }
+on_failure = "restart"
+on_exit = "restart"
+restart_delay_secs = 2
+
+[process.liveness]
+type = "tcp"
+port = 5000
+interval_secs = 10
+initial_delay_secs = 5
+
+# --- Per-repo rspacefs mounts ---
+# One process per tenant. Each mounts its own rspacefs filesystem at
+# /var/lib/qregistry/repos/<name>. The matching entry must exist in
+# qregistry.toml under [[tenants]].
+
+[[process]]
+name = "rspacefs-default"
+command = "/rspacefs-mount"
+args = [
+    "--upper", "/var/lib/qregistry/repos/default/upper",
+    "--lower", "/var/lib/qregistry/repos/default/lower",
+    "--control-socket", "/run/rspacefs/default.sock",
+    "/var/lib/qregistry/repos/default/mnt",
+]
+on_failure = "restart"
+on_exit = "restart"
+restart_delay_secs = 2
+
+[[process]]
+name = "rspacefs-dev"
+command = "/rspacefs-mount"
+args = [
+    "--upper", "/var/lib/qregistry/repos/dev/upper",
+    "--lower", "/var/lib/qregistry/repos/dev/lower",
+    "--control-socket", "/run/rspacefs/dev.sock",
+    "/var/lib/qregistry/repos/dev/mnt",
+]
+on_failure = "restart"
+on_exit = "restart"
+restart_delay_secs = 2

@@ -1,0 +1,38 @@
+# qregistry.toml — appliance config loaded by the qregistry binary at startup.
+#
+# Co-designed with config/stormd.toml: every entry in [[tenants]] should
+# have a matching `rspacefs-mount.<name>` process in the stormd config so
+# its data dir is mounted as a real rspacefs filesystem.
+
+[server]
+bind = "127.0.0.1:8081"           # iframed by stormd via /ui/proxy/qregistry
+data_dir = "/var/lib/qregistry"
+
+[registry]
+url = "http://127.0.0.1:5000"     # rspace-registry OCI endpoint
+
+# --- Tenants (repos) ---
+# Each tenant maps to its own rspacefs filesystem mounted at:
+#   <data_dir>/repos/<name>   (default if mount_point unset)
+
+[[tenants]]
+name = "default"
+description = "Default tenant. Public read; admin-only push."
+public = true
+
+[[tenants]]
+name = "dev"
+description = "Internal development images."
+public = false
+
+# --- Users ---
+# password_hash is bcrypt. Generate with:
+#   htpasswd -nbB <user> <password>
+# or with the qregistry CLI (v0.2).
+
+[[users]]
+username = "admin"
+# bcrypt of "changeme" — REPLACE BEFORE DEPLOYING.
+password_hash = "$2b$12$Du6Q4D6jzN3Y2g4N8eYqYO1bL3z0o1k0c0Z3o7Y2g4N8eYqYO1bL3z"
+admin = true
+push_tenants = ["default", "dev"]

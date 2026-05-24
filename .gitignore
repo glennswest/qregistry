@@ -1,0 +1,38 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bk
+
+# Secrets / config
+.env
+.env.*
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+config/local.toml
+config/*.local.toml
+
+# Build artifacts (non-Rust)
+dist/
+build/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs / tmp
+*.log
+tmp/
+temp/
+
+# Cross-compile artifacts
+qregistry-arm64
+qregistry-x86_64
