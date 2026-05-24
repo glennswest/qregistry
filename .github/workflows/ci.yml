@@ -121,17 +121,29 @@ jobs:
           docker push forcicd.g8.lo:5000/qregistry:latest
           docker push forcicd.g8.lo:5000/qregistry:${{ steps.ver.outputs.version }}
 
+  # Manual-only until forcicd provides a sanctioned least-privilege PVE
+  # deploy path (see github.com/glennswest/forcicd#1). On a normal push the
+  # pipeline ends at build/package/container; provision the CT by hand with
+  # deploy/provision-ct.sh, or trigger this job once PVE_SSH_KEY is set.
   deploy:
     name: provision LXC on pve.g8.lo
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v3
         with:
           name: qregistry-bins-${{ env.ARCH }}
           path: dist/${{ env.ARCH }}
+      - name: require PVE_SSH_KEY
+        env:
+          PVE_SSH_KEY: ${{ secrets.PVE_SSH_KEY }}
+        run: |
+          if [ -z "$PVE_SSH_KEY" ]; then
+            echo "PVE_SSH_KEY secret is not set — see forcicd#1 for the deploy path." >&2
+            exit 1
+          fi
       - name: setup ssh
         run: |
           mkdir -p ~/.ssh
