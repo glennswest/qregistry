@@ -20,6 +20,7 @@ pub async fn health() -> Json<HealthResponse> {
 #[derive(Serialize)]
 pub struct TenantSummary {
     pub name: String,
+    pub tier: String,
     pub public: bool,
     pub mount_point: String,
     pub description: String,
@@ -33,6 +34,7 @@ pub async fn list_tenants(State(state): State<Arc<AppState>>) -> Json<Vec<Tenant
         .iter()
         .map(|t| TenantSummary {
             name: t.name.clone(),
+            tier: t.tier.to_string(),
             public: t.public,
             mount_point: t.effective_mount_point(&data_dir).display().to_string(),
             description: t.description.clone(),

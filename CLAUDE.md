@@ -2,138 +2,146 @@
 
 ## What this project is
 
-A **container registry appliance**. One scratch image built from
-[stormdbase](https://github.com/glennswest/stormd), bundling
-[rspace_registry](https://github.com/glennswest/rspace_registry) (OCI head)
-and [rspacefs](https://github.com/glennswest/rspacefs) (per-repo
-storage), plus a small admin UI that registers itself as a stormd UI
-plugin so it surfaces in stormd's dashboard nav.
+A **container registry appliance** delivered as a **Proxmox LXC** on a
+**Fedora base**, supervised by **systemd**. It bundles
+[rspace_registry](https://github.com/glennswest/rspace_registry) (OCI head,
+one instance per storage tier) and [rspacefs](https://github.com/glennswest/rspacefs)
+(per-repo storage, v0.2), plus a small admin UI (this repo) as the front door.
 
-First deploy target: **MikroTik Rose** (ARM64). Same image runs on x86.
+First deploy target: **CT 118 on `pve.g8.lo`** — `qregistry.g8.lo`,
+192.168.8.50, vmbr0/g8. Built and deployed by
+[forcicd](https://github.com/glennswest/forcicd) (local Forgejo Actions).
+
+### Key decisions (locked)
+
+- **No stormd on Fedora** — systemd is init + supervisor. (stormd and its
+  `stormbase`/`stormpull` dep are private repos; dropping it keeps CI to
+  public repos only.)
+- **Tiered "fast and slow registry"** — two `rspace-registry` instances on
+  separate physical drives: fast=:5000 NVMe (`production-lvm`),
+  archive=:5001 ZFS HDD (`impulse1`).
+- **Data survives rootfs rebuilds** — tier data on separate Proxmox mount-
+  point volumes (mp0 fast 500G, mp1 archive 2T); `provision-ct.sh` never
+  recreates an existing volume.
+- **Ship four artifact types** — rpm, deb, container image, and the LXC.
 
 ## Cross-project rules
 
 Same rules as every project under `/Volumes/minihome/gwest/projects/`:
 
-1. **All changes are approved.** Do not ask for confirmation.
-2. **Commit and push after every logical unit of work.** No uncommitted state.
+1. **All changes are approved.** Do not ask for confirmation (but confirm
+   shared-infra coordinates like CT IDs / IPs / storage before creating).
+2. **Commit and push after every logical unit of work.**
 3. **Maintain `CHANGELOG.md`.**
 4. **Docs stay current with code.**
 5. **No claude attribution in commits.**
-6. **Never build or deploy sibling projects** (rspace_registry, rspacefs, stormd). Only build/deploy this one. If a sibling change is required, write a spec at `../<sibling>/enhancements/`.
+6. **Don't modify sibling source** (rspace_registry, rspacefs). Building
+   their binaries read-only in CI is fine; source changes go via a spec at
+   `../<sibling>/enhancements/`.
 7. **Always use `podman`, NOT docker.**
 8. **No sensitive data in commits.** Scan diffs before pushing.
 9. **Semantic versioning** — pre-1.0 minor may include breaking changes.
 
 ## Build & Deploy
 
-### Local dev (macOS, no FUSE)
+### Local dev (just the UI)
 
 ```bash
-cargo build --workspace --release
-cargo run --release -p qregistry -- --config config/qregistry.toml
-# UI on http://127.0.0.1:8081/
+cargo run -p qregistry -- --config config/qregistry.toml   # UI on :8081
 ```
 
-### Appliance image (per `/Volumes/minihome/gwest/CLAUDE.md` MikroTik Rose rules)
+### CI/CD (forcicd) — the real path
+
+Push to `main` → forcicd mirrors the repo (1-min poll) → `.github/workflows/ci.yml`:
+
+1. **build** — `cargo build --release` for qregistry; clone + build the two
+   public siblings (`rspace-registry`, `rspacefs-mount`) on the Linux
+   runner (FUSE/`fuser` compiles natively there — it cannot cross-compile
+   from macOS). Upload binaries artifact.
+2. **package** — `nfpm` → rpm + deb.
+3. **container** — `podman build` the Fedora-minimal appliance image, push
+   to `forcicd.g8.lo:5000`.
+4. **deploy** — scp binaries+config+deploy to `pve.g8.lo`, run
+   `deploy/provision-ct.sh` to create/update CT 118.
+
+Required Forgejo Actions secrets:
+- `GH_TOKEN` — clone sibling public repos / avoid rate limits.
+- `PVE_SSH_KEY` — ed25519 private key authorized as `root@pve.g8.lo`.
+
+### Local packaging
 
 ```bash
-make image
-# 1. cross-compile aarch64-unknown-linux-musl static binary
-# 2. podman build --platform linux/arm64 -f deploy/Containerfile -t qregistry
-# 3. podman push to registry.gt.lo:5000  (mkube syncs to GHCR + rolls the appliance)
+cd deploy && make rpm deb container     # needs nfpm + podman
 ```
 
-The container is `FROM registry.gt.lo:5000/stormdbase:latest`. stormd is
-PID 1. stormd's config (`config/stormd.toml`) declares three classes of
-process:
+## In-CT layout (systemd services)
 
-- `qregistry-ui` — admin UI, port 8081, registered as stormd plugin
-- `rspace-registry` — OCI registry head, port 5000
-- `rspacefs-mount.<tenant>` — one daemon per repo, mounting rspacefs at `/var/lib/qregistry/repos/<tenant>/`
+| Service | Role | Port | Data |
+|---|---|---|---|
+| `qregistry.service` | admin UI | 8081 | — |
+| `rspace-registry@fast.service` | OCI registry, fast tier | 5000 | mp0 NVMe |
+| `rspace-registry@archive.service` | OCI registry, archive tier | 5001 | mp1 ZFS |
 
-## Architecture
+`rspace-registry@.service` is a template; the per-tier `--listen` port is
+set by a drop-in (`/etc/systemd/system/rspace-registry@archive.service.d/listen.conf`).
+
+## Crates
 
 | Crate | Purpose |
 |---|---|
-| `crates/qregistry/` | binary; CLI entry point; loads TOML config, starts UI server |
-| `crates/qregistry-core/` | lib; config types (`AppConfig`, `Tenant`, `User`), persistence |
-| `crates/qregistry-ui/` | lib; axum HTTP server, HTML pages, JSON `/api/*` endpoints |
+| `crates/qregistry/` | binary; CLI; loads config, runs the axum UI |
+| `crates/qregistry-core/` | `AppConfig`, `RegistryEndpoint`, `Tenant` (with `StorageTier`), `User` |
+| `crates/qregistry-ui/` | axum server + dark admin pages (Overview / Repos / Users / System) |
 
-The UI renders **without its own nav chrome** because stormd embeds it
-in an iframe inside stormd's nav. CSS palette matches stormd
-(`#0f0f1a` bg, `#e94560` accent, `#50fa7b` green, `#8be9fd` cyan) so it
-feels native.
+## Storage tiers
 
-## How qregistry shows up in stormd's nav
+`StorageTier` = `fast` | `archive`. A tenant's rspacefs mount derives to
+`<data_dir>/repos/<tier>/<name>`. Tiers map to separate Proxmox volumes /
+physical drives (see the table above).
 
-stormd reads `[process.ui] { label, proxy }` for any `[[process]]` in its
-config and exposes that proxy URL as `/ui/ext/<process-name>` in its
-dashboard nav. So `config/stormd.toml` declares:
+## Proxmox facts (pve.g8.lo)
 
-```toml
-[[process]]
-name = "qregistry"
-command = "/qregistry"
-args = ["--config", "/etc/qregistry/qregistry.toml"]
-on_failure = "restart"
-on_exit = "restart"
-
-[process.ui]
-label = "Registry"
-proxy = "http://127.0.0.1:8081"
-```
-
-That's the entire wiring. stormd handles routing, iframe chrome, and nav.
-
-## Per-repo rspacefs
-
-Each tenant repo gets a directory under `/var/lib/qregistry/repos/<name>/`
-that is **the mount point of its own rspacefs filesystem**. stormd
-supervises one `rspacefs-mount` process per repo. rspace-registry's
-`FsStorage` is pointed at the mount point; the storage trait is
-oblivious to whether the dir is FUSE or plain — that's stormd's problem.
-
-For v0.1, the tenant list is **static** (read from `config/qregistry.toml`
-at startup, and the matching rspacefs-mount processes are declared in
-`config/stormd.toml`). Dynamic tenant CRUD (UI rewrites stormd config and
-triggers reload) lands in v0.2.
+- Stock template in use: `local:vztmpl/fedora-43-default_20251224_amd64.tar.xz`.
+- Storage → drive: `production-lvm`=NVMe Samsung 990 4TB; `test-lvm-thin`=NVMe
+  Crucial P3 2TB; `services-lvm-thin`=2×SATA SSD striped; `impulse1`=ZFS on
+  8TB Seagate HDD; `local-lvm`=SATA SSD (boot).
+- Free VMIDs were 118–120; we use **118**.
+- Host SSH: `root@pve.g8.lo` (key-authorized).
 
 ## Work Plan
 
-### v0.1.0 — Scaffold (current)
+### v0.1.0 — Tiered Fedora LXC via forcicd (current)
 
-- [x] Workspace skeleton (Cargo.toml, three crates, README/CLAUDE/CHANGELOG/LICENSE)
-- [x] `qregistry-core`: `AppConfig`, `Tenant`, `User` types + TOML loader
-- [x] `qregistry-ui`: axum server, dark stormd-style HTML, tenant list page, users page, system status page
-- [x] `qregistry` binary: clap CLI, loads config, starts UI server
-- [x] `config/qregistry.toml` sample config
-- [x] `config/stormd.toml` sample supervisor config
-- [x] `deploy/Containerfile` (FROM stormdbase, COPY binary + configs)
-- [x] `deploy/Makefile` cross-compile + podman build + push to registry.gt.lo:5000
-- [x] GitHub repo created, initial commit pushed
+- [x] Workspace skeleton + docs
+- [x] `qregistry-core`: AppConfig, RegistryEndpoint (per-tier), Tenant(tier), User
+- [x] `qregistry-ui`: standalone dark admin pages (no stormd iframe)
+- [x] `qregistry` binary: clap CLI + UI server
+- [x] Tiered config (`config/qregistry.toml`) — fast :5000 / archive :5001
+- [x] systemd units (`qregistry.service`, `rspace-registry@.service`)
+- [x] `deploy/provision-ct.sh` — idempotent, data-safe CT create/update
+- [x] Packaging: `nfpm.yaml` (rpm+deb), Containerfile + entrypoint
+- [x] `.github/workflows/ci.yml` — build → package → container → deploy
+- [ ] First green forcicd run + CT 118 live
+- [ ] Set `GH_TOKEN` + `PVE_SSH_KEY` Forgejo secrets (forcicd-side)
 
-### v0.2.0 — Dynamic tenants
+### v0.2.0 — Per-repo rspacefs + dynamic CRUD
 
-- [ ] UI add-tenant form → writes tenant entry → reloads stormd via `POST /api/v1/processes/...`
-- [ ] qregistry rewrites `config/stormd.toml` to add/remove `rspacefs-mount.<name>` and per-tenant `rspace-registry` blocks
-- [ ] Tenant deletion: stop registry process, unmount rspacefs, archive data dir
-- [ ] htpasswd file per tenant (or unified) — UI manages user CRUD
+- [ ] qregistry manages one `rspacefs-mount` per tenant under its tier
+- [ ] UI add/remove tenant + user; rewrite config + reload services
+- [ ] htpasswd export so rspace-registry `--auth-file` consumes the user list
 
 ### v0.3.0 — Offline mirror
 
-- [ ] Pull-through cache mode for a tenant: configurable upstream registry
-- [ ] Scheduled sync to a removable rspacefs partition (USB / SD)
-- [ ] UI shows mirror status, manual trigger
+- [ ] Pull-through cache per tenant (configurable upstream)
+- [ ] Scheduled sync to a removable rspacefs partition; UI status + trigger
 
-### v1.0 — Quay parity backlog
+### v1.0 — Quay parity
 
-Orgs, robot accounts, scope-based RBAC, cosign signing, vulnerability
-scanning hooks, audit log to local journal, tag immutability / retention.
+Orgs, robot accounts, RBAC, cosign signing, scanning hooks, audit log,
+tag immutability/retention. MikroTik Rose scratch-OCI flavor.
 
 ## Cross-references
 
-- **Sibling repos**: `../rspace_registry/`, `../rspacefs/`, `../stormd/`
-- **stormd UI plugin contract**: `../stormd/crates/stormd/src/web.rs` (`build_plugin`, `nav_html`)
-- **stormd process+UI config**: `../stormd/crates/stormd/src/config.rs` (`ProcessConfig`, `ProcessUiConfig`)
-- **MikroTik Rose build rules**: `/Volumes/minihome/gwest/CLAUDE.md`
+- **Sibling repos**: `../rspace_registry/`, `../rspacefs/` (public; built in CI)
+- **CI/CD**: `../forcicd/` — `scripts/bulk-mirror.sh qregistry` to onboard
+- **Proxmox/Rose build rules**: `/Volumes/minihome/gwest/CLAUDE.md`

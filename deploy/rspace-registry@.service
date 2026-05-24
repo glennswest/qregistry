@@ -1,0 +1,20 @@
+[Unit]
+Description=rspace-registry (%i tier)
+Documentation=https://github.com/glennswest/rspace_registry
+After=network-online.target
+Wants=network-online.target
+# Instance name (%i) is the tier: "fast" or "archive". The drop-in
+# /etc/systemd/system/rspace-registry@<tier>.service.d/listen.conf sets
+# the per-tier --listen port (5000 fast, 5001 archive); data lives under
+# the tier's mounted volume.
+
+[Service]
+Type=simple
+Environment=RUST_LOG=info
+Environment=LISTEN=0.0.0.0:5000
+ExecStart=/usr/local/bin/rspace-registry --listen ${LISTEN} --data /var/lib/qregistry/repos/%i/registry
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,24 +1,28 @@
-# qregistry appliance image.
+# qregistry appliance container image (no stormd; Fedora base).
 #
-# FROM stormdbase — multi-arch (arm64 + amd64) scratch image with stormd
-# as PID 1 and busybox-style commands in /bin. The container runtime
-# picks the right architecture automatically.
+# Runs the two tiered registries + the admin UI via a small entrypoint.
+# The full systemd-supervised experience is the Proxmox LXC; this image is
+# the portable container flavor.
 #
-# All three binaries (qregistry, rspace-registry, rspacefs-mount) must
-# already be cross-compiled and present in the build context. See
-# deploy/Makefile for the full pipeline.
+# Expects the three static binaries staged in dist/<arch>/ by CI:
+#   qregistry  rspace-registry  rspacefs-mount
+#
+# Build (from repo root):
+#   podman build --build-arg ARCH=x86_64 -f deploy/Containerfile \
+#       -t forcicd.g8.lo:5000/qregistry:latest .
 
-FROM registry.gt.lo:5000/stormdbase:latest
+FROM registry.fedoraproject.org/fedora-minimal:43
 
-# Static binaries (musl, target arch)
-COPY qregistry        /qregistry
-COPY rspace-registry  /rspace-registry
-COPY rspacefs-mount   /rspacefs-mount
+ARG ARCH=x86_64
 
-# Configs
+RUN microdnf install -y fuse fuse3 && microdnf clean all
+
+COPY dist/${ARCH}/qregistry       /usr/local/bin/qregistry
+COPY dist/${ARCH}/rspace-registry /usr/local/bin/rspace-registry
+COPY dist/${ARCH}/rspacefs-mount  /usr/local/bin/rspacefs-mount
+
 COPY config/qregistry.toml   /etc/qregistry/qregistry.toml
-COPY config/stormd.toml      /etc/stormd/config.toml
+COPY deploy/entrypoint.sh    /usr/local/bin/entrypoint.sh
 
-# stormd is PID 1; it reads /etc/stormd/config.toml and supervises everything.
-EXPOSE 22 5000 9080
-ENTRYPOINT ["/stormd"]
+EXPOSE 5000 5001 8081
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -1,0 +1,47 @@
+# nfpm config — builds both rpm and deb from one spec.
+#   nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+#   nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+#
+# This packages the qregistry admin/UI component for installation on a
+# normal systemd distro (Fedora/RHEL via rpm, Debian/Ubuntu via deb),
+# where it runs as a systemd service. The full appliance (stormd init +
+# rspace_registry + rspacefs) ships as the container image / LXC instead.
+
+name: qregistry
+arch: ${PKG_ARCH}
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: Glenn West <glennswest@neuralcloudcomputing.com>
+description: |
+  Container registry appliance — admin / GUI surface.
+  Multi-tenant OCI registry head with per-repo, tiered rspacefs storage.
+vendor: neuralcloudcomputing
+homepage: https://github.com/glennswest/qregistry
+license: MIT
+
+contents:
+  - src: ./dist/${PKG_ARCH}/qregistry
+    dst: /usr/bin/qregistry
+    file_info:
+      mode: 0755
+
+  - src: ./config/qregistry.toml
+    dst: /etc/qregistry/qregistry.toml
+    type: "config|noreplace"
+
+  - src: ./packaging/qregistry.service
+    dst: /usr/lib/systemd/system/qregistry.service
+
+scripts:
+  postinstall: ./packaging/postinstall.sh
+
+overrides:
+  deb:
+    depends:
+      - fuse3
+  rpm:
+    depends:
+      - fuse
