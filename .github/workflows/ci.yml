@@ -128,7 +128,9 @@ jobs:
           export XDG_RUNTIME_DIR="$(mktemp -d)"
           PODMAN="podman --storage-driver vfs --root ${XDG_RUNTIME_DIR}/storage --runroot ${XDG_RUNTIME_DIR}/run"
           if command -v podman >/dev/null 2>&1; then
-            $PODMAN build --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
+            # --isolation chroot: RUN steps via chroot, not a nested user-ns
+            # container (crun can't mount /dev/pts in the doubly-nested runner).
+            $PODMAN build --isolation chroot --build-arg ARCH=${ARCH} -f deploy/Containerfile -t ${IMG}:latest -t ${IMG}:${V} .
             $PODMAN push --tls-verify=false ${IMG}:latest
             $PODMAN push --tls-verify=false ${IMG}:${V}
           elif command -v buildah >/dev/null 2>&1; then
